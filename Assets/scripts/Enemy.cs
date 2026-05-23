@@ -1,39 +1,72 @@
 using UnityEngine;
-
 public class Enemy : MonoBehaviour
+
 {
-    [Header("Patrool")]
+    [Header("Patrol")]
     [SerializeField] Transform[] wayPoints;
-    [SerializeField] float moveSpeed;
-    private int patrolDestination;
+    [SerializeField] protected float moveSpeed = 3f;
+
+    private int patrolDestination = 0;
 
     [Header("State and animation")]
-    [SerializeField] Animator animator;
+    [SerializeField] protected Animator animator;
     public bool isAlive = true;
 
-    [Header("Ray")]
-    private float rayDistance = 0.5f;
+    [Header("Raycast Detection")]
+    [SerializeField] private float rayDistance = 5f;
     private Vector3 rayOffSet = Vector3.up * 1.5f;
     private Color rayColor = Color.red;
     private RaycastHit rayHit;
-    bool MoveToPlayer = false;
-    [SerializeField] GameObject player;
+    protected bool MoveToPlayer = false;
+    [SerializeField] protected GameObject player;
 
-    [SerializeField] BoxCollider attackCollider;
+    [Header("Combat (Прості Таймери)")]
+    [SerializeField] protected BoxCollider attackCollider;
+    [SerializeField] protected float attackCooldown = 2.5f;
+    [SerializeField] protected float delayBeforeHit = 0.6f;
+    [SerializeField] protected float hitDuration = 0.5f;
+    [SerializeField] protected float attackDistance = 1.8f;
 
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
+    protected float nextAttackTime = 0f;
+    protected float hitEnableTime = 0f;
+    protected float hitDisableTime = 0f;
+    protected float attackEndTime = 0f;
+
+    protected bool isAttacking = false;
+    protected bool hasAttackedThisCycle = false;
+
+    protected virtual void Start()
     {
         isAlive = true;
-        transform.rotation = Quaternion.Euler(0f, 90f, 0f);
-        attackCollider = GetComponent<BoxCollider>();
-        attackCollider.enabled = false;
+
+        if (animator == null) animator = GetComponent<Animator>();
+        if (attackCollider == null) attackCollider = GetComponent<BoxCollider>();
+        if (attackCollider != null) attackCollider.enabled = false;
     }
 
-    // Update is called once per frame
-    void Update()
+    protected virtual void Update()
     {
-        if (MoveToPlayer == false && isAlive == true)
+        if (!isAlive) return;
+
+        DetectPlayer();
+        HandleAttackTimers();
+
+        if (isAttacking)
+        {
+            if (player != null)
+            {
+                Vector3 direction = (player.transform.position - transform.position).normalized;
+
+                if (direction.x != 0)
+                {
+                    float targetAngle = (direction.x < 0f) ? -90f : 90f;
+                    transform.rotation = Quaternion.Euler(0f, targetAngle, 0f);
+                }
+            }
+            return;
+        }
+
+        if (!MoveToPlayer)
         {
             Patrol();
         }
@@ -41,84 +74,131 @@ public class Enemy : MonoBehaviour
         {
             FollowPlayer();
         }
-        DetectPlayer();
     }
+
     private void Patrol()
     {
-        if (patrolDestination == 0)
+        if (wayPoints == null || wayPoints.Length < 2) return;
+
+        Transform targetPoint = wayPoints[patrolDestination];
+        transform.position = Vector3.MoveTowards(transform.position, targetPoint.position, moveSpeed * Time.deltaTime);
+
+        Vector3 direction = (targetPoint.position - transform.position).normalized;
+        if (direction.x != 0)
         {
-            transform.position = Vector2.MoveTowards(transform.position, wayPoints[0].position, moveSpeed * Time.deltaTime);
-            if (Vector2.Distance(transform.position, wayPoints[0].position) < 2f)
-            {
-                transform.rotation = Quaternion.Euler(0f, 90f, 0f);
-                patrolDestination = 1;
-            }
+            float targetAngle = (direction.x < 0f) ? -90f : 90f;
+            transform.rotation = Quaternion.Euler(0f, targetAngle, 0f);
         }
 
-        if (patrolDestination == 1)
+        if (animator != null) animator.SetFloat("Speed", 0.5f);
+        if (Vector3.Distance(transform.position, targetPoint.position) < 0.5f)
         {
-            transform.position = Vector2.MoveTowards(transform.position, wayPoints[1].position, moveSpeed * Time.deltaTime);
-            if (Vector2.Distance(transform.position, wayPoints[1].position) < 2f)
-            {
-                transform.rotation = Quaternion.Euler(0f, -90f, 0f);
-                patrolDestination = 0;
-            }
+            patrolDestination = (patrolDestination == 0) ? 1 : 0;
         }
     }
+
     private void DetectPlayer()
     {
-        Vector3 rayStart = transform.position + rayOffSet;
-        Vector3 rayDirection = transform.forward;
+        if (player == null) return;
 
-        Debug.DrawRay(rayStart, rayDirection * rayDistance, rayColor);
+        float distanceToPlayer = Vector3.Distance(transform.position, player.transform.position);
 
-        if (Physics.Raycast(rayStart, rayDirection, out rayHit, rayDistance))
+        if (distanceToPlayer <= rayDistance)
         {
-            if (rayHit.collider.gameObject.CompareTag("Player"))
+            MoveToPlayer = true;
+        }
+    }
+
+    protected virtual void FollowPlayer()
+    {
+        if (player == null || !isAlive) return;
+
+        float distanceToPlayer = Vector3.Distance(transform.position, player.transform.position);
+
+        if (distanceToPlayer <= attackDistance)
+        {
+            if (animator != null) animator.SetFloat("Speed", 0f);
+            if (Time.time >= nextAttackTime)
             {
-                Debug.Log("faced");
-                MoveToPlayer = true;
+                StartAttack();
             }
         }
         else
         {
-            MoveToPlayer = false;
+            transform.position = Vector3.MoveTowards(transform.position, player.transform.position, moveSpeed * Time.deltaTime);
+            if (animator != null) animator.SetFloat("Speed", 1f);
+
+            Vector3 direction = (player.transform.position - transform.position).normalized;
+            if (direction.x != 0)
+            {
+                float targetAngle = (direction.x < 0f) ? -90f : 90f;
+                transform.rotation = Quaternion.Euler(0f, targetAngle, 0f);
+            }
         }
     }
-    private void FollowPlayer()
-    {
-        if (player == null || !isAlive) return;
-        if (player != null && isAlive == true)
-        {
-            transform.position = Vector2.MoveTowards(transform.position, player.transform.position, moveSpeed * Time.deltaTime);
-        }
-        float distanceToPlayer = Vector2.Distance(transform.position, player.transform.position);
 
-        if (distanceToPlayer <= 1f){
+    protected void StartAttack()
+    {
+        isAttacking = true;
+        hasAttackedThisCycle = false;
+
+        hitEnableTime = Time.time + delayBeforeHit;
+        hitDisableTime = hitEnableTime + hitDuration;
+        attackEndTime = Time.time + delayBeforeHit + hitDuration + 0.4f;
+        nextAttackTime = Time.time + attackCooldown;
+
+        if (animator != null)
+        {
             animator.SetTrigger("Attack");
         }
-        else
+    }
+
+    protected void HandleAttackTimers()
+    {
+        if (!isAttacking) return;
+        if (Time.time >= hitEnableTime && attackCollider != null && !attackCollider.enabled && !hasAttackedThisCycle)
         {
-            Patrol();
+            attackCollider.enabled = true;
+        }
+
+        if (Time.time >= hitDisableTime && attackCollider != null && attackCollider.enabled)
+        {
+            attackCollider.enabled = false;
+        }
+
+        if (Time.time >= attackEndTime)
+        {
+            isAttacking = false;
         }
     }
-    private void OnTriggerEnter(Collider other)
+
+    private void OnTriggerStay(Collider other)
     {
+        if (hasAttackedThisCycle) return;
         if (other.CompareTag("Player"))
         {
             Health playerHealth = other.GetComponent<Health>();
             if (playerHealth != null)
             {
                 playerHealth.TakeDamage(15f);
+                hasAttackedThisCycle = true;
             }
         }
     }
-    public void GetHit()
+
+    public virtual void GetHit()
     {
         isAlive = false;
-        animator.SetTrigger("Death");
+        if (attackCollider != null) attackCollider.enabled = false;
+        if (animator != null) animator.SetTrigger("Death");
 
         CapsuleCollider collider = GetComponent<CapsuleCollider>();
-        collider.enabled = false;
+
+        if (collider != null) collider.enabled = false;
     }
+
+    public virtual void AttackCollisionEnabled() { }
+
+    public virtual void AttackCollisionDisabled() { }
+
 }
